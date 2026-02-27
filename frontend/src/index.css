@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+html {
+  font-size: 137.5%;
+}
+
+body {
+  margin: 0;
+  background: #110e14;
+  color: #f0ece8;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+.club-card {
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  cursor: pointer;
+  user-select: none;
+}
+.club-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.club-card:active {
+  transform: translateY(-1px) scale(0.98);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.fade-in {
+  animation: fadeIn 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+select option {
+  background: #1c1820;
+  color: #f0ece8;
+}

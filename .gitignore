@@ -1,0 +1,12 @@
+/scraping
+cornell_clubs.json
+/club_logos
+CLAUDE.md
+/frontend/public/logos
+/worker/node_modules
+/worker/*.json
+/worker/*.toml
+/frontend/*.json
+/frontend/*.config.js
+/frontend/*.config.ts
+/worker/.wrangler

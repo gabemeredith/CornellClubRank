@@ -3,11 +3,86 @@ import { cors } from 'hono/cors';
 
 type Bindings = {
   DB: D1Database;
+  ASSETS: Fetcher;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
 
 app.use('/api/*', cors());
+
+// --- Anti-bot: matchup tokens (HMAC-signed) ---
+const TOKEN_SECRET = 'cornellclubmash-token-secret-2024';
+const TOKEN_MAX_AGE_MS = 60_000; // token valid for 60 seconds
+
+async function hmacSign(data: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(TOKEN_SECRET),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(data));
+  return btoa(String.fromCharCode(...new Uint8Array(sig)));
+}
+
+async function createMatchupToken(clubA: number, clubB: number): Promise<string> {
+  const ids = [clubA, clubB].sort((a, b) => a - b);
+  const timestamp = Date.now();
+  const payload = `${ids[0]}:${ids[1]}:${timestamp}`;
+  const sig = await hmacSign(payload);
+  return btoa(JSON.stringify({ p: payload, s: sig }));
+}
+
+async function verifyMatchupToken(
+  token: string,
+  winnerId: number,
+  loserId: number
+): Promise<{ valid: boolean; error?: string }> {
+  try {
+    const { p: payload, s: sig } = JSON.parse(atob(token));
+    const expectedSig = await hmacSign(payload);
+    if (sig !== expectedSig) return { valid: false, error: 'Invalid token signature' };
+
+    const [idA, idB, tsStr] = payload.split(':');
+    const ids = [Number(idA), Number(idB)];
+    const voteIds = [winnerId, loserId].sort((a, b) => a - b);
+    if (ids[0] !== voteIds[0] || ids[1] !== voteIds[1]) {
+      return { valid: false, error: 'Token does not match voted clubs' };
+    }
+
+    const age = Date.now() - Number(tsStr);
+    if (age > TOKEN_MAX_AGE_MS) return { valid: false, error: 'Token expired' };
+
+    return { valid: true };
+  } catch {
+    return { valid: false, error: 'Malformed token' };
+  }
+}
+
+// --- Anti-bot: IP rate limiting ---
+const RATE_WINDOW_MS = 60_000; // 1 minute
+const RATE_MAX_VOTES = 20;
+const voteCounts = new Map<string, { count: number; resetAt: number }>();
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = voteCounts.get(ip);
+  if (entry && now < entry.resetAt) {
+    if (entry.count >= RATE_MAX_VOTES) return false;
+    entry.count++;
+  } else {
+    voteCounts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+  }
+  // Cleanup old entries periodically
+  if (voteCounts.size > 10_000) {
+    for (const [key, val] of voteCounts) {
+      if (now >= val.resetAt) voteCounts.delete(key);
+    }
+  }
+  return true;
+}
 
 // Get two random clubs for a matchup
 app.get('/api/matchup', async (c) => {
@@ -66,19 +141,38 @@ app.get('/api/matchup', async (c) => {
     if (!fallback.results || fallback.results.length < 2) {
       return c.json({ error: 'Not enough clubs found' }, 404);
     }
-    return c.json({ clubs: fallback.results });
+    const fbClubs = fallback.results as { id: number }[];
+    const fbToken = await createMatchupToken(fbClubs[0].id, fbClubs[1].id);
+    return c.json({ clubs: fallback.results, token: fbToken });
   }
 
-  return c.json({ clubs: result.results });
+  const clubs = result.results as { id: number }[];
+  const token = await createMatchupToken(clubs[0].id, clubs[1].id);
+  return c.json({ clubs: result.results, token });
 });
 
 // Submit a vote
 app.post('/api/vote', async (c) => {
-  const body = await c.req.json<{ winnerId: number; loserId: number }>();
-  const { winnerId, loserId } = body;
+  // Rate limit by IP
+  const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
+  if (!checkRateLimit(ip)) {
+    return c.json({ error: 'Too many votes, slow down' }, 429);
+  }
+
+  const body = await c.req.json<{ winnerId: number; loserId: number; token: string }>();
+  const { winnerId, loserId, token } = body;
 
   if (!winnerId || !loserId || winnerId === loserId) {
     return c.json({ error: 'Invalid vote' }, 400);
+  }
+
+  // Verify matchup token
+  if (!token) {
+    return c.json({ error: 'Missing matchup token' }, 403);
+  }
+  const tokenResult = await verifyMatchupToken(token, winnerId, loserId);
+  if (!tokenResult.valid) {
+    return c.json({ error: tokenResult.error }, 403);
   }
 
   // Get current Elo ratings
@@ -147,6 +241,11 @@ app.get('/api/stats', async (c) => {
     topClub: topClub ?? null,
     categories: categories.results?.map((r) => r.group_type) ?? [],
   });
+});
+
+// Serve frontend assets for all non-API routes
+app.get('*', async (c) => {
+  return c.env.ASSETS.fetch(c.req.raw);
 });
 
 export default app;
