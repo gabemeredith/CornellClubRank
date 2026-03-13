@@ -8,6 +8,7 @@ CREATE TABLE clubs (
   logo_url TEXT,
   logo_file TEXT,
   group_type TEXT NOT NULL,
+  description TEXT,
   elo REAL NOT NULL DEFAULT 1200,
   wins INTEGER NOT NULL DEFAULT 0,
   losses INTEGER NOT NULL DEFAULT 0

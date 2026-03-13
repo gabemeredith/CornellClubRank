@@ -97,7 +97,7 @@ app.get('/api/matchup', async (c) => {
 
   if (category && excludeIds.length > 0) {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       WHERE group_type = ? AND id NOT IN (${placeholders})
       ORDER BY RANDOM()
@@ -106,7 +106,7 @@ app.get('/api/matchup', async (c) => {
     params = [category, ...excludeIds];
   } else if (category) {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       WHERE group_type = ?
       ORDER BY RANDOM()
@@ -115,7 +115,7 @@ app.get('/api/matchup', async (c) => {
     params = [category];
   } else if (excludeIds.length > 0) {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       WHERE id NOT IN (${placeholders})
       ORDER BY RANDOM()
@@ -124,7 +124,7 @@ app.get('/api/matchup', async (c) => {
     params = [...excludeIds];
   } else {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       ORDER BY RANDOM()
       LIMIT 2
@@ -136,8 +136,8 @@ app.get('/api/matchup', async (c) => {
   if (!result.results || result.results.length < 2) {
     // Fall back without exclusion if not enough clubs
     const fallback = category
-      ? await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses FROM clubs WHERE group_type = ? ORDER BY RANDOM() LIMIT 2').bind(category).all()
-      : await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses FROM clubs ORDER BY RANDOM() LIMIT 2').all();
+      ? await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses, description FROM clubs WHERE group_type = ? ORDER BY RANDOM() LIMIT 2').bind(category).all()
+      : await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses, description FROM clubs ORDER BY RANDOM() LIMIT 2').all();
     if (!fallback.results || fallback.results.length < 2) {
       return c.json({ error: 'Not enough clubs found' }, 404);
     }
@@ -210,7 +210,7 @@ app.get('/api/leaderboard', async (c) => {
 
   if (category) {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       WHERE group_type = ?
       ORDER BY elo DESC
@@ -218,7 +218,7 @@ app.get('/api/leaderboard', async (c) => {
     params = [category];
   } else {
     query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses
+      SELECT id, name, logo_file, group_type, elo, wins, losses, description
       FROM clubs
       ORDER BY elo DESC
     `;
