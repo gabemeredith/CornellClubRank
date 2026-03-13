@@ -23,7 +23,7 @@ export default function Header({ totalVotes }: { totalVotes: number }) {
     <header className="border-b border-white/[0.06] bg-[#110e14]/80 backdrop-blur-md sticky top-0 z-50">
       <div className="max-w-5xl mx-auto px-5 py-3 flex items-center justify-between">
         <Link to="/" className="text-lg font-bold no-underline text-[#f0ece8] tracking-tight">
-          <span className="text-[#B31B1B]">Cornell</span>ClubMash
+          <span className="text-[#B31B1B]">Cornell</span>ClubRank
         </Link>
         <nav className="flex items-center gap-1">
           {navLink('/', 'Vote')}

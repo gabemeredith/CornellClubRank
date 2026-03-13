@@ -79,7 +79,7 @@ export default function Leaderboard() {
                 <th className="px-4 py-3 text-left w-12 font-medium">#</th>
                 <th className="px-4 py-3 text-left font-medium">Club</th>
                 <th className="px-4 py-3 text-right font-medium">Elo</th>
-                <th className="px-4 py-3 text-right hidden sm:table-cell font-medium">Record</th>
+                <th className="px-4 py-3 text-right hidden sm:table-cell font-medium">Win %</th>
               </tr>
             </thead>
             <tbody>
@@ -114,7 +114,9 @@ export default function Leaderboard() {
                     {Math.round(club.elo)}
                   </td>
                   <td className="px-4 py-3 text-right text-[#5a5660] hidden sm:table-cell tabular-nums text-xs">
-                    {club.wins}W - {club.losses}L
+                    {club.wins + club.losses > 0
+                      ? `${Math.round((club.wins / (club.wins + club.losses)) * 100)}%`
+                      : '—'}
                   </td>
                 </tr>
               ))}

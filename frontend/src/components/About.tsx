@@ -5,7 +5,7 @@ export default function About() {
     <div className="max-w-md mx-auto px-5 pt-28 pb-16 text-center">
       <div className="space-y-5">
         <h1 className="text-2xl font-extrabold tracking-tight text-white">
-          <span className="text-[#B31B1B]">Cornell</span>ClubMash
+          <span className="text-[#B31B1B]">Cornell</span>ClubRank
         </h1>
 
         <p className="text-[#8a8490] text-sm leading-relaxed">
