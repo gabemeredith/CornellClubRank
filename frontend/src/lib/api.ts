@@ -41,11 +41,33 @@ export async function submitVote(winnerId: number, loserId: number, token: strin
   return res.json();
 }
 
-export async function getLeaderboard(category?: string): Promise<Club[]> {
-  const params = category ? `?category=${encodeURIComponent(category)}` : '';
-  const res = await fetch(`${BASE}/api/leaderboard${params}`);
-  const data = await res.json();
-  return data.clubs;
+export interface LeaderboardPage {
+  clubs: Club[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+export interface LeaderboardQuery {
+  category?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function getLeaderboard(
+  query: LeaderboardQuery = {},
+  signal?: AbortSignal
+): Promise<LeaderboardPage> {
+  const params = new URLSearchParams();
+  if (query.category) params.set('category', query.category);
+  if (query.search) params.set('search', query.search);
+  if (query.limit != null) params.set('limit', String(query.limit));
+  if (query.offset) params.set('offset', String(query.offset));
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/api/leaderboard${qs ? '?' + qs : ''}`, { signal });
+  return res.json();
 }
 
 export async function getStats(): Promise<Stats> {
