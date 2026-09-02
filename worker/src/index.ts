@@ -18,6 +18,7 @@ import {
   type RenderContext,
   type ShellContent,
 } from './seo';
+import { getSnapshot } from './snapshot';
 
 type Bindings = {
   DB: D1Database;
@@ -103,70 +104,40 @@ function checkRateLimit(ip: string): boolean {
 }
 
 // Get two random clubs for a matchup
+//
+// This used to be `ORDER BY RANDOM() LIMIT 2`, which makes SQLite read and sort
+// every club row to hand back two of them, on the busiest endpoint on the site.
+// The cached snapshot already holds every club, so the pick is free.
+function pickTwo<T>(pool: T[]): [T, T] {
+  const first = Math.floor(Math.random() * pool.length);
+  // Draw the second from the remaining pool, then shift past the first, so the
+  // two are never the same club and every pair is equally likely.
+  let second = Math.floor(Math.random() * (pool.length - 1));
+  if (second >= first) second++;
+  return [pool[first], pool[second]];
+}
+
 app.get('/api/matchup', async (c) => {
   const category = c.req.query('category');
   const exclude = c.req.query('exclude'); // comma-separated IDs to avoid repeats
+  const excludeIds = new Set(
+    exclude ? exclude.split(',').map(Number).filter(Boolean) : []
+  );
 
-  const excludeIds = exclude ? exclude.split(',').map(Number).filter(Boolean) : [];
-  const placeholders = excludeIds.map(() => '?').join(',');
+  const { clubs } = await getSnapshot(c.env, c.executionCtx);
+  const inScope = category
+    ? clubs.filter((club) => club.group_type === category)
+    : clubs;
 
-  let query: string;
-  let params: (string | number)[] = [];
+  // Exclusion is a nicety, not a requirement: near the end of a category it can
+  // leave fewer than two clubs, and a repeat beats a dead end.
+  let pool = inScope.filter((club) => !excludeIds.has(club.id));
+  if (pool.length < 2) pool = inScope;
+  if (pool.length < 2) return c.json({ error: 'Not enough clubs found' }, 404);
 
-  if (category && excludeIds.length > 0) {
-    query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses, description
-      FROM clubs
-      WHERE group_type = ? AND id NOT IN (${placeholders})
-      ORDER BY RANDOM()
-      LIMIT 2
-    `;
-    params = [category, ...excludeIds];
-  } else if (category) {
-    query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses, description
-      FROM clubs
-      WHERE group_type = ?
-      ORDER BY RANDOM()
-      LIMIT 2
-    `;
-    params = [category];
-  } else if (excludeIds.length > 0) {
-    query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses, description
-      FROM clubs
-      WHERE id NOT IN (${placeholders})
-      ORDER BY RANDOM()
-      LIMIT 2
-    `;
-    params = [...excludeIds];
-  } else {
-    query = `
-      SELECT id, name, logo_file, group_type, elo, wins, losses, description
-      FROM clubs
-      ORDER BY RANDOM()
-      LIMIT 2
-    `;
-  }
-
-  const result = await c.env.DB.prepare(query).bind(...params).all();
-
-  if (!result.results || result.results.length < 2) {
-    // Fall back without exclusion if not enough clubs
-    const fallback = category
-      ? await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses, description FROM clubs WHERE group_type = ? ORDER BY RANDOM() LIMIT 2').bind(category).all()
-      : await c.env.DB.prepare('SELECT id, name, logo_file, group_type, elo, wins, losses, description FROM clubs ORDER BY RANDOM() LIMIT 2').all();
-    if (!fallback.results || fallback.results.length < 2) {
-      return c.json({ error: 'Not enough clubs found' }, 404);
-    }
-    const fbClubs = fallback.results as { id: number }[];
-    const fbToken = await createMatchupToken(fbClubs[0].id, fbClubs[1].id);
-    return c.json({ clubs: fallback.results, token: fbToken });
-  }
-
-  const clubs = result.results as { id: number }[];
-  const token = await createMatchupToken(clubs[0].id, clubs[1].id);
-  return c.json({ clubs: result.results, token });
+  const pair = pickTwo(pool);
+  const token = await createMatchupToken(pair[0].id, pair[1].id);
+  return c.json({ clubs: pair, token });
 });
 
 // Submit a vote
@@ -193,44 +164,63 @@ app.post('/api/vote', async (c) => {
     return c.json({ error: tokenResult.error }, 403);
   }
 
-  // Get current Elo ratings
-  const winner = await c.env.DB.prepare('SELECT elo FROM clubs WHERE id = ?').bind(winnerId).first();
-  const loser = await c.env.DB.prepare('SELECT elo FROM clubs WHERE id = ?').bind(loserId).first();
+  // Get current Elo ratings. Read fresh rather than from the cached snapshot:
+  // the snapshot can be up to a minute behind, and scoring a vote against a
+  // stale Elo would quietly lose whatever happened in between.
+  const eloRows = await c.env.DB
+    .prepare('SELECT id, elo FROM clubs WHERE id IN (?, ?)')
+    .bind(winnerId, loserId)
+    .all();
+  const eloById = new Map(
+    (eloRows.results as { id: number; elo: number }[] | undefined ?? []).map(
+      (row) => [row.id, row.elo]
+    )
+  );
+  const winnerElo = eloById.get(winnerId);
+  const loserElo = eloById.get(loserId);
 
-  if (!winner || !loser) {
+  if (winnerElo === undefined || loserElo === undefined) {
     return c.json({ error: 'Club not found' }, 404);
   }
 
   // Elo calculation (K=32)
   const K = 32;
-  const expectedWinner = 1 / (1 + Math.pow(10, ((loser.elo as number) - (winner.elo as number)) / 400));
+  const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
   const expectedLoser = 1 - expectedWinner;
 
-  const newWinnerElo = (winner.elo as number) + K * (1 - expectedWinner);
-  const newLoserElo = (loser.elo as number) + K * (0 - expectedLoser);
+  const newWinnerElo = winnerElo + K * (1 - expectedWinner);
+  const newLoserElo = loserElo + K * (0 - expectedLoser);
 
-  // Execute all updates in a batch
+  // Execute all updates in a batch. The counter bump rides along here so the
+  // total can never drift from the votes table; it is what lets every read path
+  // skip COUNT(*). Requires migrate_vote_counter.sql to have been run.
   await c.env.DB.batch([
     c.env.DB.prepare('UPDATE clubs SET elo = ?, wins = wins + 1 WHERE id = ?').bind(newWinnerElo, winnerId),
     c.env.DB.prepare('UPDATE clubs SET elo = ?, losses = losses + 1 WHERE id = ?').bind(newLoserElo, loserId),
     c.env.DB.prepare('INSERT INTO votes (winner_id, loser_id) VALUES (?, ?)').bind(winnerId, loserId),
+    c.env.DB.prepare(
+      `INSERT INTO site_counters (key, value) VALUES ('votes', 1)
+       ON CONFLICT(key) DO UPDATE SET value = value + 1`
+    ),
   ]);
 
   return c.json({ success: true, newElo: { winner: newWinnerElo, loser: newLoserElo } });
 });
 
 // Leaderboard (paginated)
+//
+// Served entirely from the cached snapshot. The clubs table is small enough that
+// filtering and slicing it in JS is instant, and it avoids the part that was
+// actually expensive: `SELECT COUNT(*)` for the total, which SQLite answers by
+// reading every matching row, on every page of every scroll.
 const LEADERBOARD_DEFAULT_LIMIT = 25;
 const LEADERBOARD_MAX_LIMIT = 100;
 
-// Escape LIKE wildcards so a search for "50%" doesn't match everything
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-}
-
 app.get('/api/leaderboard', async (c) => {
   const category = c.req.query('category');
-  const search = c.req.query('search')?.trim();
+  // SQLite's LIKE was case-insensitive for ASCII, so lowercase both sides to
+  // keep search behaving the way it did.
+  const search = c.req.query('search')?.trim().toLowerCase();
 
   const rawLimit = Number(c.req.query('limit'));
   const limit = Number.isFinite(rawLimit) && rawLimit > 0
@@ -240,59 +230,38 @@ app.get('/api/leaderboard', async (c) => {
   const rawOffset = Number(c.req.query('offset'));
   const offset = Number.isFinite(rawOffset) && rawOffset > 0 ? Math.floor(rawOffset) : 0;
 
-  const conditions: string[] = [];
-  const filterParams: (string | number)[] = [];
+  // The snapshot is already ordered by elo DESC, id ASC. elo alone is not unique
+  // (every club starts at 1200), so that id tie-break is what keeps paging
+  // stable across requests.
+  const { clubs } = await getSnapshot(c.env, c.executionCtx);
 
-  if (category) {
-    conditions.push('group_type = ?');
-    filterParams.push(category);
-  }
+  let matches = clubs;
+  if (category) matches = matches.filter((club) => club.group_type === category);
   if (search) {
-    conditions.push("name LIKE ? ESCAPE '\\'");
-    filterParams.push(`%${escapeLike(search)}%`);
+    matches = matches.filter((club) => club.name.toLowerCase().includes(search));
   }
 
-  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  // elo alone is not unique (every club starts at 1200), so tie-break on id
-  // to keep the ordering stable across pages.
-  const pageStmt = c.env.DB.prepare(`
-    SELECT id, name, logo_file, group_type, elo, wins, losses, description
-    FROM clubs
-    ${where}
-    ORDER BY elo DESC, id ASC
-    LIMIT ? OFFSET ?
-  `).bind(...filterParams, limit, offset);
-
-  const countStmt = c.env.DB.prepare(`SELECT COUNT(*) as count FROM clubs ${where}`)
-    .bind(...filterParams);
-
-  const [page, count] = await c.env.DB.batch([pageStmt, countStmt]);
-
-  const clubs = page.results ?? [];
-  const total = ((count.results?.[0] as { count: number } | undefined)?.count) ?? 0;
+  const page = matches.slice(offset, offset + limit);
 
   return c.json({
-    clubs,
-    total,
+    clubs: page,
+    total: matches.length,
     limit,
     offset,
-    hasMore: offset + clubs.length < total,
+    hasMore: offset + page.length < matches.length,
   });
 });
 
 // Stats
 app.get('/api/stats', async (c) => {
-  const totalVotes = await c.env.DB.prepare('SELECT COUNT(*) as count FROM votes').first();
-  const totalClubs = await c.env.DB.prepare('SELECT COUNT(*) as count FROM clubs').first();
-  const topClub = await c.env.DB.prepare('SELECT name, elo FROM clubs ORDER BY elo DESC LIMIT 1').first();
-  const categories = await c.env.DB.prepare('SELECT DISTINCT group_type FROM clubs ORDER BY group_type').all();
+  const { clubs, categories, totalVotes } = await getSnapshot(c.env, c.executionCtx);
+  const top = clubs[0];
 
   return c.json({
-    totalVotes: totalVotes?.count ?? 0,
-    totalClubs: totalClubs?.count ?? 0,
-    topClub: topClub ?? null,
-    categories: categories.results?.map((r) => r.group_type) ?? [],
+    totalVotes,
+    totalClubs: clubs.length,
+    topClub: top ? { name: top.name, elo: top.elo } : null,
+    categories,
   });
 });
 
@@ -376,30 +345,16 @@ app.get('/api/crawlers', async (c) => {
 
 const PAGE_CACHE = 'public, max-age=300, stale-while-revalidate=600';
 
-// One trip to the database serves any of the pages below. The club table is small
-// (a couple of hundred rows), so ranking and filtering in JS is cheaper than
-// issuing a separate ranked query per page, and it keeps slug lookup simple:
-// slugs are derived from names rather than stored, so there is no column to index.
+// Every page below reads the same cached snapshot, so a burst of crawler traffic
+// costs no database reads at all. The club table is small (a couple of hundred
+// rows), so ranking and filtering in JS is cheaper than issuing a separate
+// ranked query per page, and it keeps slug lookup simple: slugs are derived from
+// names rather than stored, so there is no column to index.
 async function loadSite(c: {
   env: Bindings;
+  executionCtx: ExecutionContext;
 }): Promise<{ clubs: SeoClub[]; ctx: RenderContext }> {
-  const [clubsRes, votesRes] = await c.env.DB.batch([
-    c.env.DB.prepare(
-      `SELECT id, name, url, logo_file, group_type, description, elo, wins, losses
-       FROM clubs ORDER BY elo DESC, id ASC`
-    ),
-    c.env.DB.prepare('SELECT COUNT(*) as count FROM votes'),
-  ]);
-
-  const clubs = (clubsRes.results ?? []) as unknown as SeoClub[];
-  const totalVotes =
-    ((votesRes.results?.[0] as { count: number } | undefined)?.count) ?? 0;
-
-  const categories: string[] = [];
-  for (const club of clubs) {
-    if (!categories.includes(club.group_type)) categories.push(club.group_type);
-  }
-  categories.sort();
+  const { clubs, categories, totalVotes } = await getSnapshot(c.env, c.executionCtx);
 
   return {
     clubs,
