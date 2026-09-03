@@ -8,6 +8,7 @@ export interface Club {
   elo: number;
   wins: number;
   losses: number;
+  description?: string;
 }
 
 export interface Stats {

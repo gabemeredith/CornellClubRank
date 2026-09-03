@@ -41,6 +41,11 @@ export default function ClubCard({
       <h3 className="text-center text-sm font-semibold leading-snug text-[#e8e4ec] min-h-[2.5rem] flex items-center">
         {club.name}
       </h3>
+      {club.description && (
+        <p className="text-center text-[12px] text-[#7a7580] leading-snug -mt-2">
+          {club.description}
+        </p>
+      )}
       <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-white/[0.04] text-[#7a7580]">
         {club.group_type}
       </span>
