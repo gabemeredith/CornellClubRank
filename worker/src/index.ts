@@ -82,14 +82,18 @@ async function verifyMatchupToken(
 
 // --- Anti-bot: IP rate limiting ---
 const RATE_WINDOW_MS = 60_000; // 1 minute
-const RATE_MAX_VOTES = 20;
+// One vote per second sustained. The vote/load round trip keeps a human under
+// this; bots blow past it by an order of magnitude.
+const RATE_MAX_VOTES = 60;
 const voteCounts = new Map<string, { count: number; resetAt: number }>();
 
-function checkRateLimit(ip: string): boolean {
+function checkRateLimit(ip: string): { ok: boolean; retryAfterMs: number } {
   const now = Date.now();
   const entry = voteCounts.get(ip);
   if (entry && now < entry.resetAt) {
-    if (entry.count >= RATE_MAX_VOTES) return false;
+    if (entry.count >= RATE_MAX_VOTES) {
+      return { ok: false, retryAfterMs: entry.resetAt - now };
+    }
     entry.count++;
   } else {
     voteCounts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
@@ -100,7 +104,7 @@ function checkRateLimit(ip: string): boolean {
       if (now >= val.resetAt) voteCounts.delete(key);
     }
   }
-  return true;
+  return { ok: true, retryAfterMs: 0 };
 }
 
 // Get two random clubs for a matchup
@@ -144,8 +148,13 @@ app.get('/api/matchup', async (c) => {
 app.post('/api/vote', async (c) => {
   // Rate limit by IP
   const ip = c.req.header('CF-Connecting-IP') || c.req.header('X-Forwarded-For') || 'unknown';
-  if (!checkRateLimit(ip)) {
-    return c.json({ error: 'Too many votes, slow down' }, 429);
+  const rate = checkRateLimit(ip);
+  if (!rate.ok) {
+    return c.json(
+      { error: 'Too many votes, slow down', retryAfterMs: rate.retryAfterMs },
+      429,
+      { 'Retry-After': String(Math.ceil(rate.retryAfterMs / 1000)) }
+    );
   }
 
   const body = await c.req.json<{ winnerId: number; loserId: number; token: string }>();
