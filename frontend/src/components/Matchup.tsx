@@ -3,7 +3,13 @@ import type { Club } from '../lib/api';
 import { getMatchup, submitVote, getStats } from '../lib/api';
 import ClubCard from './ClubCard';
 
-export default function Matchup() {
+export default function Matchup({
+  totalVotes,
+  onVoted,
+}: {
+  totalVotes?: number;
+  onVoted?: () => void;
+}) {
   const [clubs, setClubs] = useState<Club[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [category, setCategory] = useState<string>('');
@@ -41,7 +47,8 @@ export default function Matchup() {
     if (voting) return;
     setVoting(true);
     try {
-      await submitVote(winnerId, loserId, matchupToken.current);
+      const result = await submitVote(winnerId, loserId, matchupToken.current);
+      if (result?.success) onVoted?.();
       await loadMatchup(lastIds.current);
     } finally {
       setVoting(false);
@@ -57,6 +64,12 @@ export default function Matchup() {
         <p className="text-[#6a6570] text-sm">
           pick one. elo does the rest.
         </p>
+        {/* The header hides the counter at this width; voters still get to watch it tick */}
+        {totalVotes != null && totalVotes > 0 && (
+          <p className="sm:hidden text-[11px] text-[#4a4650] mt-1.5 tabular-nums">
+            {totalVotes.toLocaleString()} votes
+          </p>
+        )}
       </div>
 
       <select
