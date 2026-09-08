@@ -49,9 +49,9 @@ export default function Matchup() {
   };
 
   return (
-    <div className="flex flex-col items-center gap-10 px-4 pt-14 pb-16">
+    <div className="flex flex-col items-center gap-6 sm:gap-10 px-3 sm:px-4 pt-8 sm:pt-14 pb-16">
       <div className="text-center">
-        <h1 className="text-3xl font-extrabold tracking-tight text-white mb-2">
+        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white mb-2">
           which club is better?
         </h1>
         <p className="text-[#6a6570] text-sm">
@@ -79,13 +79,13 @@ export default function Matchup() {
       ) : (
         <div
           key={animKey}
-          className="fade-in flex flex-col sm:flex-row items-center gap-6 sm:gap-8"
+          className="fade-in grid grid-cols-[1fr_auto_1fr] sm:grid-cols-[320px_auto_320px] items-stretch justify-items-center gap-2 sm:gap-8 w-full sm:w-auto"
         >
           <ClubCard
             club={clubs[0]}
             onClick={() => handleVote(clubs[0].id, clubs[1].id)}
           />
-          <div className="text-base font-extrabold tracking-wide text-[#B31B1B] bg-[#B31B1B]/10 border border-[#B31B1B]/20 rounded-full w-11 h-11 flex items-center justify-center shrink-0">
+          <div className="self-center text-xs sm:text-base font-extrabold tracking-wide text-[#B31B1B] bg-[#B31B1B]/10 border border-[#B31B1B]/20 rounded-full w-8 h-8 sm:w-11 sm:h-11 flex items-center justify-center shrink-0">
             vs
           </div>
           <ClubCard

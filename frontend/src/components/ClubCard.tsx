@@ -21,10 +21,10 @@ export default function ClubCard({
 
   return (
     <div
-      className="club-card bg-[#1c1820] rounded-2xl p-8 flex flex-col items-center gap-5 w-full max-w-[320px] border border-white/[0.06]"
+      className="club-card bg-[#1c1820] rounded-xl sm:rounded-2xl p-3 sm:p-8 flex flex-col items-center gap-3 sm:gap-5 w-full max-w-[320px] h-full border border-white/[0.06]"
       onClick={onClick}
     >
-      <div className="w-32 h-32 overflow-hidden bg-[#d0cdd4] border border-[#b8b5bc] flex items-center justify-center shrink-0">
+      <div className="w-16 h-16 sm:w-32 sm:h-32 overflow-hidden bg-[#d0cdd4] border border-[#b8b5bc] flex items-center justify-center shrink-0">
         {hasLogo ? (
           <img
             src={logoUrl(club.logo_file)}
@@ -38,15 +38,10 @@ export default function ClubCard({
           </span>
         )}
       </div>
-      <h3 className="text-center text-sm font-semibold leading-snug text-[#e8e4ec] min-h-[2.5rem] flex items-center">
+      <h3 className="text-center text-[13px] sm:text-sm font-semibold leading-snug text-[#e8e4ec] sm:min-h-[2.5rem] flex items-center">
         {club.name}
       </h3>
-      {club.description && (
-        <p className="text-center text-[12px] text-[#7a7580] leading-snug -mt-2">
-          {club.description}
-        </p>
-      )}
-      <span className="text-[11px] font-medium px-2.5 py-1 rounded-full bg-white/[0.04] text-[#7a7580]">
+      <span className="mt-auto text-[10px] sm:text-[11px] font-medium px-2 sm:px-2.5 py-1 rounded-full bg-white/[0.04] text-[#7a7580] text-center">
         {club.group_type}
       </span>
     </div>
