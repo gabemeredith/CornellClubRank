@@ -1,7 +1,14 @@
 @import "tailwindcss";
 
 html {
-  font-size: 137.5%;
+  font-size: 100%;
+}
+
+/* The oversized base type only works with desktop room to breathe */
+@media (min-width: 640px) {
+  html {
+    font-size: 137.5%;
+  }
 }
 
 body {
