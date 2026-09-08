@@ -10,7 +10,10 @@ function App() {
   const [totalVotes, setTotalVotes] = useState(0);
 
   useEffect(() => {
-    const poll = () => getStats().then((s) => setTotalVotes(s.totalVotes)).catch(() => {});
+    // The stats endpoint serves a snapshot that can be up to a minute stale, so
+    // never let a poll move the counter backwards past an optimistic bump.
+    const poll = () =>
+      getStats().then((s) => setTotalVotes((v) => Math.max(v, s.totalVotes))).catch(() => {});
     poll();
     const id = setInterval(poll, 10000);
     return () => clearInterval(id);
@@ -21,7 +24,15 @@ function App() {
       <div className="min-h-screen">
         <Header totalVotes={totalVotes} />
         <Routes>
-          <Route path="/" element={<Matchup />} />
+          <Route
+            path="/"
+            element={
+              <Matchup
+                totalVotes={totalVotes}
+                onVoted={() => setTotalVotes((v) => v + 1)}
+              />
+            }
+          />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/about" element={<About />} />
         </Routes>
