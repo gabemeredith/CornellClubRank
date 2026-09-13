@@ -269,7 +269,9 @@ export function renderPage(opts: PageOptions): string {
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐻</text></svg>">
+<link rel="icon" href="${SITE}/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="${SITE}/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="${SITE}/apple-touch-icon.png">
 <style>${STYLES}</style>
 ${ld}
 </head>
