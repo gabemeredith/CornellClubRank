@@ -20,6 +20,7 @@
 // rankings. That is fine here, and /api/vote returns the new Elo directly so
 // the voter's own screen updates immediately.
 
+import { applyRankFloors } from './ranking-overrides';
 import type { Club } from './seo';
 
 export interface SiteSnapshot {
@@ -98,7 +99,9 @@ async function readDatabase(env: SnapshotEnv): Promise<SiteSnapshot> {
      FROM clubs ORDER BY elo DESC, id ASC`
   ).all();
 
-  const clubs = (clubsRes.results ?? []) as unknown as Club[];
+  // Ranking order is fixed here, once, and every read path downstream takes it
+  // as given, so any override has to land before anything else looks at it.
+  const clubs = applyRankFloors((clubsRes.results ?? []) as unknown as Club[]);
 
   const categories: string[] = [];
   for (const club of clubs) {

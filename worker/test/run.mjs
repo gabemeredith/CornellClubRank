@@ -2,11 +2,12 @@
 //
 //   node worker/test/run.mjs
 //
-// No test framework and no node_modules: it compiles seo.ts with npx esbuild,
-// builds a fixture of all 197 clubs straight out of seed.sql, and asserts on the
-// rendered HTML. Run it after touching seo.ts. It has already caught duplicate
-// club names colliding onto one URL, slugs that moved when Elo changed, and a
-// comparison table that renumbered clubs from 1.
+// No test framework and no node_modules: it compiles seo.ts and
+// ranking-overrides.ts with npx esbuild, builds a fixture of all 197 clubs
+// straight out of seed.sql, and asserts on the rendered HTML. Run it after
+// touching either file. It has already caught duplicate club names colliding
+// onto one URL, slugs that moved when Elo changed, and a comparison table that
+// renumbered clubs from 1.
 
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -214,6 +215,65 @@ try {
     }) === null,
     'shell: non-shell input returns null so the route can fall back'
   );
+
+  // --- ranking-overrides.ts: the rank floors applied to the snapshot --------
+
+  const overridesBundle = join(tmp, 'ranking-overrides.mjs');
+  execFileSync(
+    'npx',
+    ['--yes', 'esbuild', join(root, 'worker', 'src', 'ranking-overrides.ts'), '--format=esm', `--outfile=${overridesBundle}`, '--log-level=warning'],
+    { stdio: 'inherit' }
+  );
+  const overrides = await import(pathToFileURL(overridesBundle).href);
+
+  const [floored, floor] = Object.entries(overrides.RANK_FLOORS)[0];
+  const rankOf = (list) => list.findIndex((c) => c.name === floored) + 1;
+  const sortedRight = (list) =>
+    list.every((c, i) => i === 0 || list[i - 1].elo > c.elo || (list[i - 1].elo === c.elo && list[i - 1].id < c.id));
+
+  const beforeFloor = clubs;
+  const withFloors = overrides.applyRankFloors(beforeFloor);
+  ok(rankOf(beforeFloor) > floor, `floors: fixture starts "${floored}" outside the top ${floor}`);
+  ok(rankOf(withFloors) <= floor, `floors: lands inside the top ${floor} (got #${rankOf(withFloors)})`);
+  ok(sortedRight(withFloors), 'floors: output still ordered elo DESC, id ASC');
+  ok(withFloors.length === beforeFloor.length, 'floors: no club added or dropped');
+  ok(rankOf(beforeFloor) > floor, 'floors: input list not reordered in place');
+  ok(
+    beforeFloor.find((c) => c.name === floored).elo < withFloors.find((c) => c.name === floored).elo,
+    'floors: input club object not mutated'
+  );
+  for (const club of beforeFloor) {
+    if (club.name === floored) continue;
+    ok(withFloors.find((c) => c.id === club.id).elo === club.elo, `floors: leaves "${club.name}" rating alone`);
+  }
+
+  // Rebuilt from scratch every minute, so a floor that compounded would run away.
+  const twice = overrides.applyRankFloors(withFloors);
+  ok(
+    twice.find((c) => c.name === floored).elo === withFloors.find((c) => c.name === floored).elo,
+    'floors: re-applying does not raise the rating again'
+  );
+
+  // Earning the rank on votes alone takes the floor out of the picture.
+  const earned = [...clubs];
+  earned[earned.findIndex((c) => c.name === floored)] = {
+    ...earned.find((c) => c.name === floored),
+    elo: earned[0].elo + 50,
+  };
+  earned.sort((a, b) => b.elo - a.elo || a.id - b.id);
+  ok(overrides.applyRankFloors(earned) === earned, 'floors: no-op when the club is already inside the target rank');
+
+  const without = clubs.filter((c) => c.name !== floored);
+  ok(overrides.applyRankFloors(without) === without, 'floors: no-op when the club is missing from the table');
+  ok(overrides.applyRankFloors(clubs, {}) === clubs, 'floors: no-op when the table is empty');
+
+  // Two well-spaced floors at once. Neighbouring floors can jostle each other by
+  // a place, which is why the table is documented as wanting them spread out.
+  const paired = overrides.applyRankFloors(clubs, { [floored]: 5, [clubs[40].name]: 2 });
+  ok(sortedRight(paired), 'floors: two floors still ordered elo DESC, id ASC');
+  ok(paired.length === clubs.length, 'floors: two floors add or drop nobody');
+  ok(paired.findIndex((c) => c.name === clubs[40].name) + 1 <= 2, 'floors: second entry reaches its rank');
+  ok(rankOf(paired) <= 5, 'floors: first entry still reaches its rank');
 
   console.log(`\n${checks - fails}/${checks} checks passed`);
 } finally {
