@@ -9,6 +9,8 @@ export interface Club {
   wins: number;
   losses: number;
   description?: string;
+  /** Position on the board this club was listed from. Leaderboard only. */
+  rank?: number;
 }
 
 export interface Stats {
@@ -48,6 +50,8 @@ export interface LeaderboardPage {
   limit: number;
   offset: number;
   hasMore: boolean;
+  /** Category the ranks count against, or null when they are overall ranks. */
+  rankScope: string | null;
 }
 
 export interface LeaderboardQuery {

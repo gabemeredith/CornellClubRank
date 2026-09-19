@@ -16,6 +16,8 @@ export default function Leaderboard() {
   const [category, setCategory] = useState<string>('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  // Which board the ranks in `clubs` are counted against, straight from the API.
+  const [rankScope, setRankScope] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
 
@@ -54,6 +56,7 @@ export default function Leaderboard() {
         setClubs(page.clubs);
         setTotal(page.total);
         setHasMore(page.hasMore);
+        setRankScope(page.rankScope ?? null);
         setLoading(false);
       })
       .catch((err) => {
@@ -140,6 +143,13 @@ export default function Leaderboard() {
         />
       </div>
 
+      {/* Search pulls clubs out of order, so say what the # column is counting. */}
+      {debouncedSearch && clubs.length > 0 && (
+        <div className="text-[11px] text-[#5a5660] mb-2">
+          Showing ranks {rankScope ? `within ${rankScope}` : 'across all clubs'}
+        </div>
+      )}
+
       {loading && clubs.length === 0 ? (
         <div className="text-[#5a5660] text-center py-20 text-sm">Loading...</div>
       ) : clubs.length === 0 ? (
@@ -166,7 +176,9 @@ export default function Leaderboard() {
                     key={club.id}
                     className="border-t border-white/[0.03] hover:bg-white/[0.02] transition-colors"
                   >
-                    <td className="px-3 sm:px-4 py-3 text-[#4a4650] font-mono text-xs">{i + 1}</td>
+                    <td className="px-3 sm:px-4 py-3 text-[#4a4650] font-mono text-xs">
+                      {club.rank ?? i + 1}
+                    </td>
                     <td className="px-3 sm:px-4 py-3">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 overflow-hidden bg-[#d0cdd4] border border-[#b8b5bc] flex items-center justify-center shrink-0">

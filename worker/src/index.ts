@@ -244,11 +244,16 @@ app.get('/api/leaderboard', async (c) => {
   // stable across requests.
   const { clubs } = await getSnapshot(c.env, c.executionCtx);
 
-  let matches = clubs;
-  if (category) matches = matches.filter((club) => club.group_type === category);
-  if (search) {
-    matches = matches.filter((club) => club.name.toLowerCase().includes(search));
-  }
+  // Rank is fixed before the search filter runs, so a club keeps the number it
+  // holds on the full board instead of being renumbered from 1 by whatever the
+  // visitor typed. A category filter does count as its own board: inside
+  // "Business Frats" the interesting number is the rank within that category.
+  const scope = category ? clubs.filter((club) => club.group_type === category) : clubs;
+  const ranked = scope.map((club, i) => ({ ...club, rank: i + 1 }));
+
+  const matches = search
+    ? ranked.filter((club) => club.name.toLowerCase().includes(search))
+    : ranked;
 
   const page = matches.slice(offset, offset + limit);
 
@@ -258,6 +263,9 @@ app.get('/api/leaderboard', async (c) => {
     limit,
     offset,
     hasMore: offset + page.length < matches.length,
+    // What the ranks in this page are counted against, so the client can label
+    // them ("#12 overall" vs "#3 in Business Frats").
+    rankScope: category ?? null,
   });
 });
 
