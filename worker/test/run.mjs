@@ -2,7 +2,7 @@
 //
 //   node worker/test/run.mjs
 //
-// No test framework and no node_modules: it compiles seo.ts with npx esbuild,
+// No test framework and no node_modules: it compiles seo.ts and boost.ts with npx esbuild,
 // builds a fixture of all 197 clubs straight out of seed.sql, and asserts on the
 // rendered HTML. Run it after touching seo.ts. It has already caught duplicate
 // club names colliding onto one URL, slugs that moved when Elo changed, and a
@@ -214,6 +214,53 @@ try {
     }) === null,
     'shell: non-shell input returns null so the route can fall back'
   );
+
+  // --- boost.ts: the hand-placed floor under one club's rank ----------------
+
+  const boostBundle = join(tmp, 'boost.mjs');
+  execFileSync(
+    'npx',
+    ['--yes', 'esbuild', join(root, 'worker', 'src', 'boost.ts'), '--format=esm', `--outfile=${boostBundle}`, '--log-level=warning'],
+    { stdio: 'inherit' }
+  );
+  const boost = await import(pathToFileURL(boostBundle).href);
+
+  const rankOf = (list) => list.findIndex((c) => c.name === boost.BOOSTED_CLUB) + 1;
+  const sortedRight = (list) =>
+    list.every((c, i) => i === 0 || list[i - 1].elo > c.elo || (list[i - 1].elo === c.elo && list[i - 1].id < c.id));
+
+  const beforeBoost = clubs;
+  const boosted = boost.applyBoost(beforeBoost);
+  ok(rankOf(beforeBoost) > boost.BOOSTED_RANK, `boost: fixture starts "${boost.BOOSTED_CLUB}" outside the top ${boost.BOOSTED_RANK}`);
+  ok(rankOf(boosted) <= boost.BOOSTED_RANK, `boost: lands inside the top ${boost.BOOSTED_RANK} (got #${rankOf(boosted)})`);
+  ok(sortedRight(boosted), 'boost: output still ordered elo DESC, id ASC');
+  ok(boosted.length === beforeBoost.length, 'boost: no club added or dropped');
+  ok(rankOf(beforeBoost) > boost.BOOSTED_RANK, 'boost: input list not reordered in place');
+  ok(
+    beforeBoost.find((c) => c.name === boost.BOOSTED_CLUB).elo < boosted.find((c) => c.name === boost.BOOSTED_CLUB).elo,
+    'boost: input club object not mutated'
+  );
+  for (const club of beforeBoost) {
+    if (club.name === boost.BOOSTED_CLUB) continue;
+    ok(boosted.find((c) => c.id === club.id).elo === club.elo, `boost: leaves "${club.name}" rating alone`);
+  }
+
+  // Rebuilt from scratch every minute, so a floor that compounded would run away.
+  const twice = boost.applyBoost(boosted);
+  ok(
+    twice.find((c) => c.name === boost.BOOSTED_CLUB).elo === boosted.find((c) => c.name === boost.BOOSTED_CLUB).elo,
+    'boost: re-applying does not raise the rating again'
+  );
+
+  // Earning the rank on votes alone takes the floor out of the picture.
+  const earned = [...clubs];
+  const ktp = { ...earned.find((c) => c.name === boost.BOOSTED_CLUB), elo: earned[0].elo + 50 };
+  earned[earned.findIndex((c) => c.name === boost.BOOSTED_CLUB)] = ktp;
+  earned.sort((a, b) => b.elo - a.elo || a.id - b.id);
+  ok(boost.applyBoost(earned) === earned, 'boost: no-op when the club is already inside the target rank');
+
+  const without = clubs.filter((c) => c.name !== boost.BOOSTED_CLUB);
+  ok(boost.applyBoost(without) === without, 'boost: no-op when the club is missing from the table');
 
   console.log(`\n${checks - fails}/${checks} checks passed`);
 } finally {
